@@ -3,7 +3,10 @@
 #include <sys/socket.h>
 #include <unistd.h>
 #include <string.h>
- 
+
+#include <openssl/ssl.h>
+#include <openssl/err.h>
+
 #define PORT 8080
 #define BUFFER_SIZE 1024
  
