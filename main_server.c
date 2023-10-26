@@ -4,8 +4,7 @@
 #include <unistd.h>
 #include <string.h>
 
-#include <openssl/ssl.h>
-#include <openssl/err.h>
+#include "ssl/ssl.h"
 
 #define PORT 8080
 #define BUFFER_SIZE 1024
@@ -35,7 +34,7 @@ int main(){
         
         struct sockaddr_in host_addr;
         int host_addrlen = sizeof(host_addr);
- 
+        initialize_ssl();
         host_addr.sin_family = AF_INET;
         host_addr.sin_port = htons(PORT);
         host_addr.sin_addr.s_addr = htonl(INADDR_ANY);
