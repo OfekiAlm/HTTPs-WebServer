@@ -3,7 +3,9 @@
 #include <sys/socket.h>
 #include <unistd.h>
 #include <string.h>
- 
+
+#include "ssl/ssl.h"
+
 #define PORT 8080
 #define BUFFER_SIZE 1024
  
@@ -32,7 +34,12 @@ int main(){
         
         struct sockaddr_in host_addr;
         int host_addrlen = sizeof(host_addr);
- 
+
+        initialize_ssl();
+        SSL_CTX *ctx = create_context();
+        configure_context(ctx);
+        SSL *ssl = SSL_new(ctx);
+
         host_addr.sin_family = AF_INET;
         host_addr.sin_port = htons(PORT);
         host_addr.sin_addr.s_addr = htonl(INADDR_ANY);
@@ -54,49 +61,87 @@ int main(){
         
         printf("[] socket listening for connections 128 (MAX CONNECTIONS)\n");
         for(;;){
-                int newsockfd = accept(sockfd,(struct sockaddr *)&host_addr, (socklen_t *)&host_addrlen);
-                if(newsockfd == -1){
-                        perror("webserver (accept)");
-                        return 1;
-                }
-                printf("[] socket accepted a new connection\n");
-                
-                int sockn = getsockname(newsockfd, (struct sockaddr *)&client_addr,
-                                                (socklen_t *)&client_addrlen);
-                if (sockn < 0) {
-                        perror("webserver (getsockname)");
-                        continue;
-                }
- 
- 
-                //try to read data from request.
-                int readVal = read(newsockfd,buffer,BUFFER_SIZE);
-                if(readVal < 0){
-                        perror("webserver (read)");
-                        continue;
-                }
- 
-                //prints the user ip&port and request data.             
-                char method[BUFFER_SIZE], uri[BUFFER_SIZE], version[BUFFER_SIZE];
-                sscanf(buffer, "%s %s %s", method, uri, version);
-                
-                printf("[%s:%u]\nThis is the method %s\nVERSION: %s\nURI: %s\n", 
-                                inet_ntoa(client_addr.sin_addr), ntohs(client_addr.sin_port), 
-                                method, version, uri);
-                int writeVal = 0;
-                if(strcmp(uri,"/favicon.ico") == 0){
-                    writeVal = write(newsockfd, ErrorResp ,strlen(ErrorResp));
-                } 
-                else{
-                    writeVal = write(newsockfd, resp,strlen(resp));
-                }
+            int newsockfd = accept(sockfd,(struct sockaddr *)&host_addr, (socklen_t *)&host_addrlen);
+            SSL_set_fd(ssl, newsockfd);
+            if(newsockfd == -1){
+                    perror("webserver (accept)");
+                    return 1;
+            }
+            printf("[] socket accepted a new connection\n");
 
-                if(writeVal < 0){
-                            perror("webserver (write)");
-                            continue;
-                }
-                close(newsockfd);
+            if (SSL_accept(ssl) <= 0) {
+                ERR_print_errors_fp(stderr);
+            }
+
+            int sockn = getsockname(newsockfd, (struct sockaddr *)&client_addr,
+                                            (socklen_t *)&client_addrlen);
+            if (sockn < 0) {
+                    perror("webserver (getsockname)");
+                    continue;
+            }
+
+
+            //try to read data from request.
+            int readVal = SSL_read(ssl,buffer, sizeof(buffer));
+            if(readVal < 0){
+                    perror("webserver (read)");
+                    continue;
+            }
+
+            //prints the user ip&port and request data.
+            char method[BUFFER_SIZE], uri[BUFFER_SIZE], version[BUFFER_SIZE];
+            sscanf(buffer, "%s %s %s", method, uri, version);
+
+            printf("[%s:%u]\nThis is the method %s\nVERSION: %s\nURI: %s\n",
+                            inet_ntoa(client_addr.sin_addr), ntohs(client_addr.sin_port),
+                            method, version, uri);
+            int writeVal = 0;
+            if(strcmp(uri,"/favicon.ico") == 0){
+                writeVal = SSL_write(ssl, ErrorResp ,strlen(ErrorResp));
+            }
+            else{
+                writeVal = SSL_write(ssl, resp ,strlen(resp));
+                //writeVal = serve_file(ssl,"s.html");
+            }
+
+            if(writeVal < 0){
+                        perror("webserver (write)");
+                        continue;
+            }
+
+            SSL_shutdown(ssl);
+            SSL_free(ssl);
+
+            close(newsockfd);
+
+
+            //clean up
+
+            SSL_CTX_free(ctx); //context
+            EVP_cleanup(); //cleanup ssl lib
+
         }
         return 0;
+}
+
+int serve_file(SSL *ssl, const char *filename) {
+    char buffer[1024];
+    FILE *file = fopen(filename, "r");
+
+    if (file == NULL) {
+        // File not found, send 404
+        SSL_write(ssl, "HTTP/1.1 404 Not Found\r\nContent-Type: text/html\r\n\r\n", 47);
+        SSL_write(ssl, "<html><body><h1>404 Not Found</h1></body></html>", 49);
+        return -1;
+    } else {
+        // File found, send file content
+        SSL_write(ssl, "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n", 45);
+        size_t in;
+        while ((in = fread(buffer, 1, sizeof(buffer), file) > 0)) {
+            SSL_write(ssl, file, in);
+        }
+        fclose(file);
+    }
+    return 0;
 }
 

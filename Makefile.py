@@ -5,7 +5,7 @@ for dirpath, dirnames, filenames in os.walk('.'):
     for filename in filenames:
         if filename.endswith('.c'):
             c_files.append(os.path.join(dirpath, filename))
-FLAGS = "-Wall "
+FLAGS = "-Wall -lssl -lcrypto "
 gcc_cmd = 'gcc '
 
 for c_file in c_files:
